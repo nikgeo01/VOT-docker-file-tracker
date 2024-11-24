@@ -1,10 +1,12 @@
+version: '3.8'
+
 services:
   db:
     image: postgres:13
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=file_usage_tracker
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: file_usage_tracker
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
@@ -20,16 +22,21 @@ services:
   app:
     build: .
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/file_usage_tracker
-      - DISPLAY=host.docker.internal:0.0
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/file_usage_tracker
+      DISPLAY: host.docker.internal:0.0
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./db:/app/db  # Mount the 'db' directory from host to container
     networks:
       - app-network
+    ports:
+      - "8000:8000"  # Adjust if your application requires exposing ports
 
 volumes:
   db_data:
 
 networks:
   app-network:
+    driver: bridge

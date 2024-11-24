@@ -8,7 +8,10 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 import csv
 
 # Load environment variable for DATABASE_URL
-DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/file_usage_tracker')
+DATABASE_URL = os.environ.get(
+    'DATABASE_URL',
+    'postgresql://postgres:postgres@localhost:5432/file_usage_tracker'
+)
 
 # Create the database engine
 engine = create_engine(DATABASE_URL)
@@ -17,14 +20,22 @@ Base = declarative_base()
 
 # Define the database model
 class UserActivity(Base):
-    __tablename__ = 'user_activity'
-    id = Column(Integer, primary_key=True)
-    user_name = Column(String)
-    date_and_hour = Column(DateTime)
-    file_worked_on = Column(String)
-    time_spent_seconds = Column(Float)
-    app_used = Column(String)
-    project_name = Column(String)
+    """
+    SQLAlchemy model for the 'user_activities' table.
+    """
+    __tablename__ = 'user_activities'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_name = Column(String, nullable=False)
+    date_and_hour = Column(DateTime, nullable=False)
+    file_worked_on = Column(String, nullable=True)
+    time_spent_seconds = Column(Float, default=0.0)
+    app_used = Column(String, nullable=True)
+    project_name = Column(String, nullable=True)
+
+    def __repr__(self):
+        return (f"<UserActivity(id={self.id}, user_name='{self.user_name}', "
+                f"date_and_hour='{self.date_and_hour}')>")
 
 # Function to generate the project report
 def generate_project_report(project_name, output_file):
