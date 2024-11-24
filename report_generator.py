@@ -1,52 +1,48 @@
 import os
-import csv
 import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter import filedialog
 from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, func
+from sqlalchemy.orm import sessionmaker, declarative_base
+import csv
 
-def generate_project_report(yearly_reports_path, project_name, output_file):
-    """
-    Generates a CSV report showing the total time each user spent on a specified project,
-    along with the total time spent on the project by all users.
-    """
-    user_time_spent = {}
+# Load environment variable for DATABASE_URL
+DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/file_usage_tracker')
 
-    # Iterate over all yearly user files
-    for filename in os.listdir(yearly_reports_path):
-        if filename.endswith('.csv') and '-' in filename and not filename.endswith('-projects.csv'):
-            # Extract the username from the filename
-            parts = filename.split('-')
-            if len(parts) >= 2:
-                user_name_with_extension = parts[1]
-                user_name = user_name_with_extension.replace('.csv', '')
-                user_file = os.path.join(yearly_reports_path, filename)
-                try:
-                    with open(user_file, 'r', newline='', encoding='utf-8') as csvfile:
-                        reader = csv.DictReader(csvfile)
-                        for row in reader:
-                            if row.get('Project Name') == project_name:
-                                time_spent_str = row.get('Time Spent on File (seconds)', '0')
-                                try:
-                                    time_spent = float(time_spent_str)
-                                except ValueError:
-                                    time_spent = 0.0
-                                if user_name in user_time_spent:
-                                    user_time_spent[user_name] += time_spent
-                                else:
-                                    user_time_spent[user_name] = time_spent
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to read {user_file}.\nError: {e}")
+# Create the database engine
+engine = create_engine(DATABASE_URL)
+Session = sessionmaker(bind=engine)
+Base = declarative_base()
 
-    if not user_time_spent:
-        messagebox.showinfo("No Data", f"No data found for project '{project_name}'.")
-        return
+# Define the database model
+class UserActivity(Base):
+    __tablename__ = 'user_activity'
+    id = Column(Integer, primary_key=True)
+    user_name = Column(String)
+    date_and_hour = Column(DateTime)
+    file_worked_on = Column(String)
+    time_spent_seconds = Column(Float)
+    app_used = Column(String)
+    project_name = Column(String)
 
-    # Calculate the total time spent on the project by all users
-    total_time_spent = sum(user_time_spent.values())
-
-    # Write the report to a CSV file
+# Function to generate the project report
+def generate_project_report(project_name, output_file):
+    session = Session()
     try:
+        # Query total time spent by each user on the project
+        results = session.query(
+            UserActivity.user_name,
+            func.sum(UserActivity.time_spent_seconds).label('total_time')
+        ).filter(UserActivity.project_name == project_name).group_by(UserActivity.user_name).all()
+
+        if not results:
+            messagebox.showinfo("No Data", f"No data found for project '{project_name}'.")
+            return
+
+        total_time_spent = sum([row.total_time for row in results])
+
+        # Write to CSV
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
             fieldnames = [
                 'User Name',
@@ -55,216 +51,178 @@ def generate_project_report(yearly_reports_path, project_name, output_file):
             ]
             writer = csv.writer(csvfile)
             writer.writerow(fieldnames)
-            for user_name, user_time in user_time_spent.items():
-                writer.writerow([user_name, user_time, total_time_spent])
-
+            for row in results:
+                writer.writerow([row.user_name, row.total_time, total_time_spent])
             # Add a total row at the end
             writer.writerow(['Total', total_time_spent, total_time_spent])
+
         messagebox.showinfo("Success", f"Project report generated successfully at:\n{output_file}")
     except Exception as e:
-        messagebox.showerror("Error", f"Failed to write the project report.\nError: {e}")
+        messagebox.showerror("Error", f"Failed to generate project report.\nError: {e}")
+    finally:
+        session.close()
 
-def generate_user_activity_report(yearly_reports_path, user_name, start_date, end_date, output_file):
-    """
-    Generates a CSV report listing all files a user has worked on within a specified time period,
-    aggregating data from all years.
-    """
-    activity_data = []
-
-    # Find all yearly user files for the specified user
-    for filename in os.listdir(yearly_reports_path):
-        if filename.endswith(f'-{user_name}.csv'):
-            user_file = os.path.join(yearly_reports_path, filename)
-            try:
-                with open(user_file, 'r', newline='', encoding='utf-8') as csvfile:
-                    reader = csv.DictReader(csvfile)
-                    for row in reader:
-                        date_and_hour = row.get('Date and Hour')
-                        if date_and_hour:
-                            try:
-                                entry_date = datetime.strptime(date_and_hour, '%Y-%m-%d %H:%M')
-                                if start_date <= entry_date <= end_date:
-                                    activity_data.append({
-                                        'Date and Hour': date_and_hour,
-                                        'File Worked On': row.get('File Worked On', '-'),
-                                        'Time Spent on File (seconds)': row.get('Time Spent on File (seconds)', '0'),
-                                        'App Used': row.get('App Used', 'Unknown'),
-                                        'Project Name': row.get('Project Name', '-')
-                                    })
-                            except ValueError:
-                                # Skip rows with invalid date formats
-                                print(f"Skipping row with invalid date format: {date_and_hour}")
-                                continue
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to read {user_file}.\nError: {e}")
-
-    # Write the report to a CSV file
-    if activity_data:
-        # Sort the activity data by date
-        activity_data.sort(key=lambda x: datetime.strptime(x['Date and Hour'], '%Y-%m-%d %H:%M'))
-        try:
-            with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
-                fieldnames = ['Date and Hour', 'File Worked On', 'Time Spent on File (seconds)', 'App Used', 'Project Name']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(activity_data)
-            messagebox.showinfo("Success", f"User activity report generated successfully at:\n{output_file}")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to write the user activity report.\nError: {e}")
-    else:
-        messagebox.showinfo("No Data", f"No activity found for user '{user_name}' in the specified time period.")
-
-def create_gui():
-    root = tk.Tk()
-    root.title("Report Generator")
-    root.geometry("600x500")
-    root.resizable(False, False)
-
-    # Set the theme
-    style = ttk.Style(root)
-    style.theme_use('clam')  # You can choose 'default', 'clam', 'alt', 'classic'
-
-    notebook = ttk.Notebook(root)
-    notebook.pack(expand=True, fill='both', padx=10, pady=10)
-
-    # Project Report Tab
-    project_tab = ttk.Frame(notebook)
-    notebook.add(project_tab, text='Project Report')
-
-    # Project Report Frame
-    project_frame = ttk.Frame(project_tab, padding="10 10 10 10")
-    project_frame.pack(fill='both', expand=True)
-
-    # Layout for Project Report
-    project_grid = [
-        ("Project Name:", "project_name_entry"),
-        ("Yearly Reports Folder:", "project_folder_entry", "Browse", "browse_project_folder"),
-        ("Output CSV File:", "project_output_entry", "Browse", "browse_project_output")
-    ]
-
-    for idx, item in enumerate(project_grid):
-        ttk.Label(project_frame, text=item[0]).grid(row=idx, column=0, sticky='W', pady=5)
-        entry = ttk.Entry(project_frame, width=50)
-        entry.grid(row=idx, column=1, pady=5, padx=5)
-        if len(item) > 2:
-            button = ttk.Button(project_frame, text=item[2], command=lambda e=entry, cmd=item[3]: globals()[cmd](e))
-            button.grid(row=idx, column=2, pady=5)
-        globals()[item[1]] = entry
-
-    ttk.Button(project_frame, text="Generate Report", command=lambda: run_project_report(
-        project_folder_entry.get(),
-        project_name_entry.get(),
-        project_output_entry.get()
-    )).grid(row=len(project_grid), column=1, pady=20)
-
-    # User Activity Report Tab
-    user_tab = ttk.Frame(notebook)
-    notebook.add(user_tab, text='User Activity Report')
-
-    # User Activity Frame
-    user_frame = ttk.Frame(user_tab, padding="10 10 10 10")
-    user_frame.pack(fill='both', expand=True)
-
-    # Layout for User Activity Report
-    user_grid = [
-        ("User Name:", "user_name_entry"),
-        ("Start Date (YYYY-MM-DD):", "start_date_entry"),
-        ("End Date (YYYY-MM-DD):", "end_date_entry"),
-        ("Yearly Reports Folder:", "user_folder_entry", "Browse", "browse_user_folder"),
-        ("Output CSV File:", "user_output_entry", "Browse", "browse_user_output")
-    ]
-
-    for idx, item in enumerate(user_grid):
-        ttk.Label(user_frame, text=item[0]).grid(row=idx, column=0, sticky='W', pady=5)
-        entry = ttk.Entry(user_frame, width=50)
-        entry.grid(row=idx, column=1, pady=5, padx=5)
-        if len(item) > 2:
-            button = ttk.Button(user_frame, text=item[2], command=lambda e=entry, cmd=item[3]: globals()[cmd](e))
-            button.grid(row=idx, column=2, pady=5)
-        globals()[item[1]] = entry
-
-    ttk.Button(user_frame, text="Generate Report", command=lambda: run_user_activity_report(
-        user_folder_entry.get(),
-        user_name_entry.get(),
-        start_date_entry.get(),
-        end_date_entry.get(),
-        user_output_entry.get()
-    )).grid(row=len(user_grid), column=1, pady=20)
-
-    root.mainloop()
-
-def browse_project_folder(entry_widget):
-    folder_selected = filedialog.askdirectory()
-    if folder_selected:
-        entry_widget.delete(0, tk.END)
-        entry_widget.insert(0, folder_selected)
-
-def browse_project_output(entry_widget):
-    file_selected = filedialog.asksaveasfilename(defaultextension=".csv",
-                                                 filetypes=[("CSV files", "*.csv")])
-    if file_selected:
-        entry_widget.delete(0, tk.END)
-        entry_widget.insert(0, file_selected)
-
-def browse_user_folder(entry_widget):
-    folder_selected = filedialog.askdirectory()
-    if folder_selected:
-        entry_widget.delete(0, tk.END)
-        entry_widget.insert(0, folder_selected)
-
-def browse_user_output(entry_widget):
-    file_selected = filedialog.asksaveasfilename(defaultextension=".csv",
-                                                 filetypes=[("CSV files", "*.csv")])
-    if file_selected:
-        entry_widget.delete(0, tk.END)
-        entry_widget.insert(0, file_selected)
-
-def run_project_report(yearly_reports_path, project_name, output_file):
-    if not yearly_reports_path or not project_name or not output_file:
-        tk.messagebox.showwarning("Input Error", "Please fill in all fields for the Project Report.")
-        return
-
-    if not os.path.isdir(yearly_reports_path):
-        tk.messagebox.showerror("Invalid Folder", f"The specified yearly reports folder does not exist:\n{yearly_reports_path}")
-        return
-
-    # Confirm overwriting if file exists
-    if os.path.exists(output_file):
-        overwrite = tk.messagebox.askyesno("Overwrite File", f"The file '{output_file}' already exists. Do you want to overwrite it?")
-        if not overwrite:
-            return
-
-    generate_project_report(yearly_reports_path, project_name, output_file)
-
-def run_user_activity_report(yearly_reports_path, user_name, start_date_str, end_date_str, output_file):
-    if not yearly_reports_path or not user_name or not start_date_str or not end_date_str or not output_file:
-        tk.messagebox.showwarning("Input Error", "Please fill in all fields for the User Activity Report.")
-        return
-
-    if not os.path.isdir(yearly_reports_path):
-        tk.messagebox.showerror("Invalid Folder", f"The specified yearly reports folder does not exist:\n{yearly_reports_path}")
-        return
-
+# Function to generate the user activity report
+def generate_user_activity_report(user_name, start_date, end_date, output_file):
+    session = Session()
     try:
-        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-        end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
-        # Adjust end_date to include the entire day
-        end_date = end_date.replace(hour=23, minute=59, second=59)
-    except ValueError:
-        tk.messagebox.showerror("Date Format Error", "Invalid date format. Please use YYYY-MM-DD.")
-        return
+        # Query user activity within the date range
+        results = session.query(UserActivity).filter(
+            UserActivity.user_name == user_name,
+            UserActivity.date_and_hour >= start_date,
+            UserActivity.date_and_hour <= end_date
+        ).order_by(UserActivity.date_and_hour).all()
 
-    if start_date > end_date:
-        tk.messagebox.showerror("Date Range Error", "Start date must be before or equal to end date.")
-        return
-
-    # Confirm overwriting if file exists
-    if os.path.exists(output_file):
-        overwrite = tk.messagebox.askyesno("Overwrite File", f"The file '{output_file}' already exists. Do you want to overwrite it?")
-        if not overwrite:
+        if not results:
+            messagebox.showinfo("No Data", f"No activity found for user '{user_name}' in the specified time period.")
             return
 
-    generate_user_activity_report(yearly_reports_path, user_name, start_date, end_date, output_file)
+        # Write to CSV
+        with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['Date and Hour', 'File Worked On', 'Time Spent on File (seconds)', 'App Used', 'Project Name']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            for activity in results:
+                writer.writerow({
+                    'Date and Hour': activity.date_and_hour.strftime('%Y-%m-%d %H:%M'),
+                    'File Worked On': activity.file_worked_on or '-',
+                    'Time Spent on File (seconds)': activity.time_spent_seconds or '0',
+                    'App Used': activity.app_used or 'Unknown',
+                    'Project Name': activity.project_name or '-'
+                })
+
+        messagebox.showinfo("Success", f"User activity report generated successfully at:\n{output_file}")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to generate user activity report.\nError: {e}")
+    finally:
+        session.close()
+
+# Main application GUI
+class ReportGeneratorApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Report Generator")
+
+        # Create tabs
+        self.tab_control = ttk.Notebook(root)
+
+        self.project_report_tab = ttk.Frame(self.tab_control)
+        self.user_activity_report_tab = ttk.Frame(self.tab_control)
+
+        self.tab_control.add(self.project_report_tab, text='Project Report')
+        self.tab_control.add(self.user_activity_report_tab, text='User Activity Report')
+
+        self.tab_control.pack(expand=1, fill='both')
+
+        self.create_project_report_tab()
+        self.create_user_activity_report_tab()
+
+    def create_project_report_tab(self):
+        # Project Name
+        ttk.Label(self.project_report_tab, text="Project Name:").grid(column=0, row=0, padx=10, pady=10, sticky='E')
+        self.project_name_entry = ttk.Entry(self.project_report_tab, width=30)
+        self.project_name_entry.grid(column=1, row=0, padx=10, pady=10)
+
+        # Output File
+        ttk.Label(self.project_report_tab, text="Output File:").grid(column=0, row=1, padx=10, pady=10, sticky='E')
+        self.project_output_entry = ttk.Entry(self.project_report_tab, width=30)
+        self.project_output_entry.grid(column=1, row=1, padx=10, pady=10)
+        self.project_output_entry.insert(0, "project_report.csv")
+
+        # Browse Button
+        self.project_browse_button = ttk.Button(self.project_report_tab, text="Browse", command=self.browse_project_output)
+        self.project_browse_button.grid(column=2, row=1, padx=10, pady=10)
+
+        # Generate Button
+        self.project_generate_button = ttk.Button(self.project_report_tab, text="Generate Report", command=self.generate_project_report_action)
+        self.project_generate_button.grid(column=1, row=2, padx=10, pady=20)
+
+    def create_user_activity_report_tab(self):
+        # User Name
+        ttk.Label(self.user_activity_report_tab, text="User Name:").grid(column=0, row=0, padx=10, pady=10, sticky='E')
+        self.user_name_entry = ttk.Entry(self.user_activity_report_tab, width=30)
+        self.user_name_entry.grid(column=1, row=0, padx=10, pady=10)
+
+        # Start Date
+        ttk.Label(self.user_activity_report_tab, text="Start Date (YYYY-MM-DD):").grid(column=0, row=1, padx=10, pady=10, sticky='E')
+        self.start_date_entry = ttk.Entry(self.user_activity_report_tab, width=30)
+        self.start_date_entry.grid(column=1, row=1, padx=10, pady=10)
+
+        # End Date
+        ttk.Label(self.user_activity_report_tab, text="End Date (YYYY-MM-DD):").grid(column=0, row=2, padx=10, pady=10, sticky='E')
+        self.end_date_entry = ttk.Entry(self.user_activity_report_tab, width=30)
+        self.end_date_entry.grid(column=1, row=2, padx=10, pady=10)
+
+        # Output File
+        ttk.Label(self.user_activity_report_tab, text="Output File:").grid(column=0, row=3, padx=10, pady=10, sticky='E')
+        self.user_output_entry = ttk.Entry(self.user_activity_report_tab, width=30)
+        self.user_output_entry.grid(column=1, row=3, padx=10, pady=10)
+        self.user_output_entry.insert(0, "user_activity_report.csv")
+
+        # Browse Button
+        self.user_browse_button = ttk.Button(self.user_activity_report_tab, text="Browse", command=self.browse_user_output)
+        self.user_browse_button.grid(column=2, row=3, padx=10, pady=10)
+
+        # Generate Button
+        self.user_generate_button = ttk.Button(self.user_activity_report_tab, text="Generate Report", command=self.generate_user_activity_report_action)
+        self.user_generate_button.grid(column=1, row=4, padx=10, pady=20)
+
+    def browse_project_output(self):
+        filename = filedialog.asksaveasfilename(defaultextension=".csv")
+        if filename:
+            self.project_output_entry.delete(0, tk.END)
+            self.project_output_entry.insert(0, filename)
+
+    def browse_user_output(self):
+        filename = filedialog.asksaveasfilename(defaultextension=".csv")
+        if filename:
+            self.user_output_entry.delete(0, tk.END)
+            self.user_output_entry.insert(0, filename)
+
+    def generate_project_report_action(self):
+        project_name = self.project_name_entry.get().strip()
+        output_file = self.project_output_entry.get().strip()
+
+        if not project_name:
+            messagebox.showerror("Input Error", "Please enter a project name.")
+            return
+
+        if not output_file:
+            messagebox.showerror("Input Error", "Please specify an output file.")
+            return
+
+        generate_project_report(project_name, output_file)
+
+    def generate_user_activity_report_action(self):
+        user_name = self.user_name_entry.get().strip()
+        start_date_str = self.start_date_entry.get().strip()
+        end_date_str = self.end_date_entry.get().strip()
+        output_file = self.user_output_entry.get().strip()
+
+        if not user_name:
+            messagebox.showerror("Input Error", "Please enter a user name.")
+            return
+
+        if not start_date_str or not end_date_str:
+            messagebox.showerror("Input Error", "Please enter both start date and end date.")
+            return
+
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            # Adjust end_date to include the entire day
+            end_date = end_date.replace(hour=23, minute=59, second=59)
+        except ValueError:
+            messagebox.showerror("Input Error", "Invalid date format. Please use YYYY-MM-DD.")
+            return
+
+        if not output_file:
+            messagebox.showerror("Input Error", "Please specify an output file.")
+            return
+
+        generate_user_activity_report(user_name, start_date, end_date, output_file)
 
 if __name__ == "__main__":
-    create_gui()
+    root = tk.Tk()
+    app = ReportGeneratorApp(root)
+    root.mainloop()
