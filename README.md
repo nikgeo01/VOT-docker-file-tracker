@@ -19,10 +19,6 @@ This project includes:
 - [Application Overview](#application-overview)
   - [Tracking Application](#tracking-application)
   - [Report Generator](#report-generator)
-- [Running the Application with Docker](#running-the-application-with-docker)
-  - [Starting the Containers](#starting-the-containers)
-  - [Stopping the Containers](#stopping-the-containers)
-- [Troubleshooting](#troubleshooting)
 - [Additional Notes](#additional-notes)
 - [License](#license)
 
