@@ -7,6 +7,16 @@ pipeline {
     }
     
     stages {
+        stage('Install Dependencies') {
+            steps {
+                sh '''
+                    apt-get update
+                    apt-get install -y python3 python3-pip python3-venv
+                    python3 --version
+                '''
+            }
+        }
+        
         stage('Checkout') {
             steps {
                 checkout scm
@@ -16,9 +26,10 @@ pipeline {
         stage('Setup Python Environment') {
             steps {
                 sh '''
-                    python -m venv venv
+                    python3 -m venv venv
                     . venv/bin/activate
-                    pip install -r requirements.txt
+                    pip3 install --upgrade pip
+                    pip3 install -r requirements.txt
                 '''
             }
         }
@@ -27,7 +38,7 @@ pipeline {
             steps {
                 sh '''
                     . venv/bin/activate
-                    python -m pytest tests/ || true  # Add tests when available
+                    python3 -m pytest tests/ || true  # Add tests when available
                 '''
             }
         }
