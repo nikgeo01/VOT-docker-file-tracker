@@ -11,8 +11,13 @@ pipeline {
             steps {
                 sh '''
                     apt-get update
-                    apt-get install -y python3 python3-pip python3-venv
+                    apt-get install -y python3 python3-pip python3-venv curl
                     python3 --version
+                    
+                    # Install Docker Compose
+                    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+                    chmod +x /usr/local/bin/docker-compose
+                    docker-compose --version
                 '''
             }
         }
@@ -55,8 +60,17 @@ pipeline {
         stage('Deploy with Docker Compose') {
             steps {
                 sh '''
+                    if ! command -v docker-compose &> /dev/null; then
+                        echo "Docker Compose is not installed. Installing..."
+                        curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+                        chmod +x /usr/local/bin/docker-compose
+                    fi
+                    
                     docker-compose down || true
-                    docker-compose up -d
+                    docker-compose up -d || {
+                        echo "Failed to start containers with docker-compose"
+                        exit 1
+                    }
                 '''
             }
         }
@@ -74,6 +88,12 @@ pipeline {
         }
         failure {
             echo 'Pipeline failed!'
+            sh '''
+                echo "Checking Docker status..."
+                docker ps
+                echo "Checking Docker Compose status..."
+                docker-compose ps || true
+            '''
         }
     }
 } 
