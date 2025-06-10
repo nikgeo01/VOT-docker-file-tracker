@@ -20,13 +20,17 @@ pipeline {
                     pip3 --version
 
                     echo "Checking for Docker Compose plugin (new syntax)..."
-                    if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
-                        echo "Docker Compose plugin not found or not working. Attempting to install standalone docker-compose (old syntax)..."
+                    # Проверяваме дали docker compose (без тире) работи
+                    # Използваме 'sh -c' за да изпълним командата в под-шел и да проверим exit code.
+                    if sudo sh -c 'docker compose version >/dev/null 2>&1'; then
+                        echo "Docker Compose plugin found. Using new syntax."
+                    elif sudo sh -c 'command -v docker-compose >/dev/null 2>&1'; then
+                        echo "Standalone docker-compose (old syntax) found."
+                    else
+                        echo "Neither 'docker compose' nor 'docker-compose' found. Attempting to install standalone docker-compose..."
                         sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
                         sudo chmod +x /usr/local/bin/docker-compose
                         docker-compose --version
-                    else
-                        echo "Docker Compose plugin found. Using new syntax."
                     fi
                 '''
             }
@@ -40,7 +44,6 @@ pipeline {
 
         stage('Setup Python Environment') {
             steps {
-                // Ако APP_DIR е дефиниран, влезте в него.
                 // script {
                 //     if (env.APP_DIR) {
                 //         sh "cd ${env.APP_DIR}"
@@ -57,7 +60,6 @@ pipeline {
 
         stage('Run Tests') {
             steps {
-                // Ако APP_DIR е дефиниран, влезте в него.
                 // script {
                 //     if (env.APP_DIR) {
                 //         sh "cd ${env.APP_DIR}"
@@ -73,7 +75,6 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Ако APP_DIR е дефиниран, влезте в него преди build
                     // if (env.APP_DIR) {
                     //     sh "cd ${env.APP_DIR}"
                     // }
@@ -87,26 +88,26 @@ pipeline {
         stage('Deploy with Docker Compose') {
             steps {
                 script {
-                    // Ако APP_DIR е дефиниран, влезте в него преди deploy
                     // if (env.APP_DIR) {
                     //     sh "cd ${env.APP_DIR}"
                     // }
                     echo "Attempting to deploy with Docker Compose..."
-                    if docker compose version >/dev/null 2>&1; then // Проверяваме коя команда за docker compose работи
+                    // Забележете: Използваме 'sh -c' за да изпълним командата в под-шел и да проверим exit code
+                    if (sh(script: 'docker compose version >/dev/null 2>&1', returnStatus: true) == 0) {
+                        echo "Deployed using 'docker compose' (new syntax)."
                         sh '''
                             docker compose down || true
                             docker compose up -d --build
                         '''
-                        echo "Deployed using 'docker compose' (new syntax)."
-                    elif command -v docker-compose >/dev/null 2>&1; then
+                    } else if (sh(script: 'command -v docker-compose >/dev/null 2>&1', returnStatus: true) == 0) {
+                        echo "Deployed using 'docker-compose' (old syntax)."
                         sh '''
                             docker-compose down || true
                             docker-compose up -d --build
                         '''
-                        echo "Deployed using 'docker-compose' (old syntax)."
-                    else
+                    } else {
                         error "Neither 'docker compose' nor 'docker-compose' found. Deployment failed."
-                    fi
+                    }
                 }
             }
         }
